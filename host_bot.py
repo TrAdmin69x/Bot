@@ -8,7 +8,9 @@ import subprocess
 import signal
 import uuid
 import re
+import threading
 from pathlib import Path
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 try:
     import psutil
@@ -23,11 +25,11 @@ from telegram.ext import (
 )
 
 # ==========================================
-# ⚙️ SECURE CONFIGURATION (Railway Env Vars)
+# ⚙️ HARDCODED SECURE CONFIGURATION
 # ==========================================
-# গিটহাবে টোকেন লুকানোর জন্য os.environ ব্যবহার করা হয়েছে
-MASTER_BOT_TOKEN = os.environ.get("MASTER_TOKEN", "আপনার_টোকেন_এখানে_দিন")  
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "6368178779"))  
+# আপনার দেওয়া টোকেন ও আইডি সরাসরি কোডে সেট করে দেওয়া হয়েছে
+MASTER_BOT_TOKEN = os.environ.get("MASTER_TOKEN", "8997769178:AAGyKIRCc8uOpVvW6RReBtNM8NHvPqMAv6Y")  
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "7198813851"))  
 
 HOST_DIR = Path("hosted_bots")
 HOST_DIR.mkdir(exist_ok=True)
@@ -41,6 +43,24 @@ STD_LIBS = {"os","sys","json","re","time","math","random","datetime","collection
 
 PACKAGE_MAPPING = {"telegram": "python-telegram-bot", "cv2": "opencv-python", 
                    "bs4": "beautifulsoup4", "PIL": "Pillow", "yaml": "PyYAML"}
+
+# Railway Port Binder to prevent crashes
+class DummyServer(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/html")
+        self.end_headers()
+        self.wfile.write(b"Cloud Master Server is running smoothly!")
+    def log_message(self, format, *args):
+        pass
+
+def start_dummy_web_server():
+    try:
+        port = int(os.environ.get("PORT", 8080))
+        server = HTTPServer(("0.0.0.0", port), DummyServer)
+        server.serve_forever()
+    except Exception as e:
+        print(f"Web server error: {e}")
 
 def load_db() -> dict:
     if DB_FILE.exists():
@@ -65,7 +85,7 @@ def is_approved(uid): return is_mod(uid) or str(uid) in db.get("users", {})
 def get_limit(uid): return 999 if is_mod(uid) else db.get("users", {}).get(str(uid), 0)
 
 # ==========================================
-# 🛡️ WATCHDOG (Spam Message Removed & Loop Fixed)
+# 🛡️ WATCHDOG (Spam Message Disabled & Silent Error Handling)
 # ==========================================
 async def watchdog(bot: Bot):
     while True:
@@ -74,10 +94,9 @@ async def watchdog(bot: Bot):
             if b_info.get("status") == "running":
                 proc = active_processes.get(b_id)
                 if proc is None or proc.poll() is not None:
-                    # 🌟 FIX: স্প্যামিং মেসেজ মুছে দেওয়া হয়েছে এবং স্ট্যাটাস Error করা হয়েছে
                     db["bots"][b_id]["status"] = "error"
                     save_db(db)
-                    print(f"Watchdog: Bot {b_info['bot_username']} crashed. Status set to error.")
+                    print(f"Watchdog: Bot {b_info['bot_username']} crashed. Status set to error silenty.")
 
 async def post_init(app: Application):
     for b_id, b_info in db["bots"].items():
@@ -180,7 +199,7 @@ async def auth_cmds(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if cmd == "/addmod":
         if int(target) not in db.get("moderators", []): db["moderators"].append(int(target))
-        await update.message.reply_text(f"✅ {target} এখন একজন মডারেটর!")
+        await update.message.reply_text(f"✅ {target} এখন একজন মডারেটর! আপনি যেকোনো সময় মডারেটর অ্যাড বা রিমুভ করতে পারবেন।")
     elif cmd == "/delmod":
         if int(target) in db.get("moderators", []): db["moderators"].remove(int(target))
         await update.message.reply_text(f"✅ {target} মডারেটর থেকে রিমুভড!")
@@ -375,6 +394,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except BadRequest: pass
 
 def main():
+    # Start Dummy Web Server thread for Railway compatibility (prevents crashes)
+    threading.Thread(target=start_dummy_web_server, daemon=True).start()
+    
     app = ApplicationBuilder().token(MASTER_BOT_TOKEN).post_init(post_init).build()
     
     conv_handler = ConversationHandler(
